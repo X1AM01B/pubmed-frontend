@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PubMed 领域文献计量分析</title>
+<meta name="description" content="输入研究关键词，自动完成 PubMed 检索、期刊指标匹配、计量统计与中文综述。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231c4a7a'/%3E%3Cg fill='%23ffffff'%3E%3Crect x='8' y='18' width='4' height='6'/%3E%3Crect x='14' y='12' width='4' height='12'/%3E%3Crect x='20' y='15' width='4' height='9' opacity='.75'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <h1>PubMed 领域文献计量分析</h1>
+        <p>关键词检索 · 期刊指标匹配 · 计量统计 · 中文综述生成</p>
+      </div>
+    </div>
+    <div class="health" id="health" title="后端组件状态"></div>
+  </div>
+</header>
+
+<main class="wrap main-content">
+
+  <!-- ============ 1. 搜索区 ============ -->
+  <section class="card search-card" aria-label="检索条件">
+    <form id="searchForm" autocomplete="off">
+      <div class="field field-keyword">
+        <label for="keyword">研究关键词</label>
+        <input type="text" id="keyword" placeholder="例如：single-cell RNA sequencing" required>
+      </div>
+      <div class="field field-year">
+        <label for="yearFrom">起始年</label>
+        <input type="number" id="yearFrom" min="1900" max="2100" step="1">
+      </div>
+      <div class="field field-year">
+        <label for="yearTo">截止年</label>
+        <input type="number" id="yearTo" min="1900" max="2100" step="1">
+      </div>      <div class="field field-limit">
+        <label for="limit">分析篇数上限</label>
+        <input type="number" id="limit" min="20" max="10000" step="1">
+      </div>
+      <div class="field field-demo">
+        <label for="demoSelect">演示模式</label>
+        <select id="demoSelect">
+          <option value="">— 预置关键词 —</option>
+        </select>
+      </div>
+      <div class="field field-submit">
+        <label class="label-ghost" for="searchBtn">提交</label>
+        <button type="submit" class="btn btn-primary" id="searchBtn">开始分析</button>
+      </div>
+    </form>
+    <p class="hint">
+      直接回车即可提交。年份默认最近 5 年；分析上限默认 2000 篇（因 PubMed 按相关度返回，超出部分会被截断，截断口径会在提示条中说明）。
+    </p>
+  </section>
+
+  <!-- ============ 初始引导（检索后自动隐藏） ============ -->
+  <section class="card welcome-card" id="welcome" aria-label="使用引导">
+    <div class="welcome-head">
+      <h2 class="welcome-title">输入一个研究关键词，看清一个领域的全貌</h2>
+      <p class="welcome-sub">
+        自动完成 PubMed 检索、期刊指标匹配、计量统计与中文综述生成。不需要自备数据文件，也不需要安装桌面软件。
+      </p>
+    </div>
+    <div class="welcome-cols">
+      <div class="welcome-block">
+        <h3>你会拿到什么</h3>
+        <ul class="welcome-list">
+          <li><b>规模与分布</b>：命中总量、逐年文献量（全量精确计数）、中科院与 JCR 分区分布、影响因子直方图</li>
+          <li><b>主题脉络</b>：MeSH 主题词云（点击词语可筛选文献）与研究方向的中文概括</li>
+          <li><b>影响力双榜</b>：近 5 年按期刊影响因子、按被引次数各取 Top 100，可排序可跳转 PubMed</li>
+          <li><b>领域综述</b>：基于代表文献摘要生成的约 500 字中文分点报告，内联 PMID 可追溯</li>
+        </ul>
+      </div>
+      <div class="welcome-block">
+        <h3>一键试用</h3>
+        <div class="welcome-quick" id="welcomeQuick">
+          <span class="welcome-note">正在加载预置关键词…</span>
+        </div>
+        <p class="welcome-note">
+          带「已缓存」标记的关键词已预生成完整结果，点击后约 1 秒出图，断网时也可用。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 查询解析条 ============ -->
+  <section class="card query-bar" id="queryBar" hidden aria-label="PubMed 查询解析">
+    <div class="query-bar-head">
+      <span class="tag tag-accent">PubMed 查询解析</span>
+      <span class="query-bar-note">你输入的关键词被 PubMed 自动扩展到以下检索式，这决定了后面所有统计的口径</span>
+    </div>
+    <div class="query-row">
+      <div class="query-label">实际提交检索式</div>
+      <code class="query-code" id="effectiveTerm">—</code>
+    </div>
+    <div class="query-row">
+      <div class="query-label">自动扩展翻译（MeSH / 同义词）</div>
+      <code class="query-code query-code-sm" id="translatedQuery">—</code>
+    </div>
+  </section>
+
+  <!-- ============ 提示与口径 warnings ============ -->
+  <section class="warnbar" id="warnBar" hidden aria-label="数据口径提示">
+    <button type="button" class="warnbar-head" id="warnToggle" aria-expanded="false">
+      <span class="warn-dot" aria-hidden="true"></span>
+      <span class="warnbar-title" id="warnTitle">数据口径提示</span>
+      <span class="warnbar-caret" aria-hidden="true"></span>
+    </button>
+    <ul class="warnbar-list" id="warnList"></ul>
+  </section>
+
+  <!-- ============ 加载态（阶段由后端 /api/search/stream 的 start 事件动态给出） ============ -->
+  <section class="card state-card" id="loadingCard" hidden aria-live="polite">
+    <div class="load-head">
+      <h2 class="state-title" id="loadTitle">正在分析，请稍候</h2>
+      <span class="load-elapsed" id="loadElapsed" hidden>已用 0 秒</span>
+    </div>
+
+    <div class="overall" id="overall">
+      <div class="overall-top">
+        <span class="overall-text" id="overallText">正在连接后端…</span>
+        <span class="overall-pct" id="overallPct"></span>
+      </div>
+      <div class="overall-track"><div class="overall-fill" id="overallFill"></div></div>
+    </div>
+
+    <ol class="steps" id="steps"></ol>
+
+    <div class="skeleton" id="loadSkeleton">
+      <div class="sk-card"></div><div class="sk-card"></div>
+      <div class="sk-card"></div><div class="sk-card"></div>
+    </div>
+  </section>
+
+  <!-- ============ 错误态 ============ -->
+  <section class="card state-card state-error" id="errorCard" hidden role="alert">
+    <h2 class="state-title">分析未能完成</h2>
+    <p class="state-msg" id="errorMsg"></p>
+    <div class="state-advice">
+      <div class="state-advice-title">可以尝试：</div>
+      <ul id="errorAdvice"></ul>
+    </div>
+    <button type="button" class="btn btn-ghost" id="errorRetry">重新检索</button>
+  </section>
+
+  <!-- ============ 空态 ============ -->
+  <section class="card state-card state-empty" id="emptyCard" hidden>
+    <h2 class="state-title">没有分析到文献</h2>
+    <p class="state-msg" id="emptyMsg"></p>
+    <div class="state-advice">
+      <div class="state-advice-title">建议：</div>
+      <ul>
+        <li>更换或放宽关键词，优先使用领域通用词（如 <code>single-cell RNA sequencing</code>）。</li>
+        <li>放宽年份区间，或确认年份区间与主题的活跃期一致。</li>
+        <li>避免在关键词中直接写 <code>AND</code> / 引号等 PubMed 语法造成检索式为空。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 结果主体 ============ -->
+  <div id="results" hidden>
+
+    <!-- ============ 3. 概览卡片 ============ -->
+    <section class="stat-grid" id="overview" aria-label="概览指标"></section>
+
+    <!-- ============ 4. 图表区 ============ -->
+    <section class="chart-grid" aria-label="统计图表">
+
+      <article class="card chart-card">
+        <header class="card-head">
+          <div>
+            <h2 class="card-title">年份趋势</h2>
+            <p class="card-sub">文献量（柱，全量精确计数）与影响因子中位数（折线，右轴，基于抽样）</p>
+          </div>
+        </header>
+        <div class="chart-body" id="chartYear"></div>
+      </article>
+
+      <article class="card chart-card">
+        <header class="card-head">
+          <div>
+            <h2 class="card-title">分区分布</h2>
+            <p class="card-sub" id="zoneSub">按中科院大类分区统计文献占比</p>
+          </div>
+          <div class="seg" id="zoneSeg" role="tablist" aria-label="分区口径切换">
+            <button type="button" class="seg-btn is-active" data-mode="cas" role="tab">中科院大类分区</button>
+            <button type="button" class="seg-btn" data-mode="jcr" role="tab">JCR 分区</button>
+          </div>
+        </header>
+        <div class="chart-body" id="chartZone"></div>
+      </article>
+
+      <article class="card chart-card">
+        <header class="card-head">
+          <div>
+            <h2 class="card-title">影响因子分布</h2>
+            <p class="card-sub" id="ifSub">仅统计匹配到 JCR 影响因子的文献</p>
+          </div>
+        </header>
+        <div class="chart-body" id="chartIf"></div>
+      </article>
+
+      <article class="card chart-card">
+        <header class="card-head">
+          <div>
+            <h2 class="card-title">研究主题词云</h2>
+            <p class="card-sub">字号表示出现频次；点击词语可筛选下方文献表</p>
+          </div>
+          <div class="seg" role="tablist" aria-label="词云来源切换">
+            <button type="button" class="seg-btn is-active" data-kw="cloud" role="tab">合并词云</button>
+            <button type="button" class="seg-btn" data-kw="mesh_major" role="tab">仅 MeSH 主词</button>
+          </div>
+        </header>
+        <div class="chart-body" id="chartCloud"></div>
+      </article>
+
+    </section>
+
+    <!-- ============ 5. 研究方向概括 ============ -->
+    <section class="card stream-card" aria-label="研究方向概括">
+      <header class="card-head">
+        <div>
+          <h2 class="card-title">研究方向概括</h2>
+          <p class="card-sub">由大模型基于检索统计与主题词分布生成（流式输出）</p>
+        </div>
+        <span class="chip" id="summaryChip" hidden></span>
+      </header>
+      <div class="stream-body" id="summaryBody">
+        <span class="stream-placeholder">等待检索结果…</span>
+      </div>
+      <div class="tag-cloud" id="meshTags" hidden>
+        <div class="tag-cloud-title">Top MeSH 主题词（点击筛选下方文献表）</div>
+        <div class="tag-cloud-items" id="meshTagItems"></div>
+      </div>
+    </section>
+
+    <!-- ============ 6. Top100 文献表 ============ -->
+    <section class="card table-card" aria-label="高影响力文献榜">
+      <header class="card-head">
+        <div>
+          <h2 class="card-title">高影响力文献榜（Top 100）</h2>
+          <p class="card-sub" id="tableSub">—</p>
+        </div>
+        <div class="seg" id="tabSeg" role="tablist" aria-label="榜单口径切换">
+          <button type="button" class="seg-btn is-active" data-tab="by_if" role="tab">按期刊影响因子</button>
+          <button type="button" class="seg-btn" data-tab="by_citations" role="tab">按被引次数</button>
+        </div>
+      </header>
+
+      <div class="note-box" id="topNote" hidden>
+        <span class="note-label">口径说明</span>
+        <span id="topNoteText"></span>
+      </div>
+
+      <div class="table-toolbar">
+        <input type="search" id="tableFilter" placeholder="过滤标题 / 期刊 / 作者 / 主题词…" aria-label="过滤文献表">
+        <span class="filter-state" id="tableFilterState"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="articleTable">
+          <thead>
+            <tr>
+              <th class="col-idx">#</th>
+              <th class="col-title sortable" data-sort="title">标题</th>
+              <th class="col-journal sortable" data-sort="journal_if">期刊 / 影响因子</th>
+              <th class="col-year sortable" data-sort="year">年份</th>
+              <th class="col-cite sortable" data-sort="citations">被引</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div class="table-empty" id="tableEmpty" hidden>没有符合过滤条件的文献。</div>
+    </section>
+
+    <!-- ============ 7. 领域综述报告 ============ -->
+    <section class="card stream-card review-card" aria-label="领域综述报告">
+      <header class="card-head">
+        <div>
+          <h2 class="card-title">领域综述报告</h2>
+          <p class="card-sub">基于本次检索统计与代表文献生成，正文内联 PMID 可点击跳转</p>
+        </div>
+        <span class="chip" id="reviewChip" hidden></span>
+      </header>
+      <div class="stream-body stream-body-md" id="reviewBody">
+        <span class="stream-placeholder">等待检索结果…</span>
+      </div>
+      <div class="review-actions">
+        <button type="button" class="btn btn-ghost" id="copyReview" disabled>复制全文</button>
+        <button type="button" class="btn btn-ghost" id="exportReview" disabled>导出 Markdown</button>
+      </div>
+    </section>
+
+  </div><!-- /#results -->
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <h3>数据来源与版本</h3>
+        <ul>
+          <li>影响因子：JCR 2025（Clarivate）</li>
+          <li>分区：中科院分区升级版 2025（官方自 2026 年起停止更新）</li>
+          <li>文献元数据：PubMed E-utilities（NCBI）</li>
+          <li>被引数据：OpenAlex</li>
+        </ul>
+      </div>
+      <div>
+        <h3>口径与覆盖率的坦诚说明</h3>
+        <p class="footer-lead">
+          每次检索的具体口径（抽样篇数、覆盖率、额度状态等）都会在结果页的提示条里逐条列出；以下是适用于所有查询的通用说明。
+        </p>
+        <details class="footer-details">
+          <summary class="footer-summary">
+            <span class="footer-summary-title">展开通用说明</span>
+            <span class="footer-summary-hint">7 条</span>
+          </summary>
+          <ul>
+            <li><b>年份分布为 PubMed 全量精确计数</b>（逐年查询的命中数，非抽样估算）。各年之和会略高于区间总命中数，因为出版日期跨年的记录（如 2023 Dec–2024 Jan）会被多个年份同时计入。</li>
+            <li>影响因子、分区、词云等统计基于<b>按年份配额分层抽样的 N 篇</b>（各年样本量按该年文献量比例分配），不代表该领域全部文献。</li>
+            <li>MeSH 主题词覆盖率天然偏低（宽泛关键词深度抽样时各年约 37–53%），因为相关度排序会优先返回标引完整的记录；词云因此采用 MeSH 与标题摘要关键词的并集。</li>
+            <li>未匹配到 JCR / 中科院期刊指标的文献<b>不参与</b>影响因子统计，也不按 0 计入。</li>
+            <li>JCR 分区与中科院分区口径不同，两者不可直接混用比较。</li>
+            <li>被引次数来自 OpenAlex，更新滞后于实时数据，且仅覆盖有 DOI 的文献。</li>
+            <li>AI 生成的综述仅供线索参考，PMID 与数值均来自检索统计，但结论请以原文为准。</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <p class="footer-meta">本页面为文献计量分析演示，数据版权归各来源方所有，不作为商业用途。</p>
+  </div>
+</footer>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="api-config.js"></script>
+<script src="static/vendor/echarts.min.js"></script>
+<script src="static/vendor/echarts-wordcloud.min.js"></script>
+<script src="static/app.js"></script>
+</body>
+</html>
